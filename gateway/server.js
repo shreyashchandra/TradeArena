@@ -5,14 +5,20 @@ const { Pool } = require('pg');
 
 const PORT = Number(process.env.PORT || 8080);
 const BACKEND_URL = process.env.BACKEND_URL || 'http://localhost:8081';
-const DATABASE_URL = process.env.DATABASE_URL || 'postgres://tradearena:tradearena@localhost:5432/tradearena';
+const DATABASE_URL = process.env.DATABASE_URL || (process.env.NODE_ENV === 'production'
+  ? 'postgresql://postgres:bA5v7KtIhyIFrH8i@db.qbwskelvnmqpanxnzswt.supabase.co:5432/postgres'
+  : 'postgres://tradearena:tradearena@localhost:5432/tradearena');
 const RATE_LIMIT_WINDOW_MS = Number(process.env.RATE_LIMIT_WINDOW_MS || 60_000);
 const RATE_LIMIT_MAX = Number(process.env.RATE_LIMIT_MAX || 240);
 
 const clients = new Set();
 const buckets = new Map();
 const sessions = new Map();
-const pool = new Pool({ connectionString: DATABASE_URL });
+const pool = new Pool({
+  connectionString: DATABASE_URL,
+  family: 4,
+  ssl: DATABASE_URL.includes('supabase.co') ? { rejectUnauthorized: false } : false,
+});
 const metrics = {
   startedAt: Date.now(),
   requests: 0,
