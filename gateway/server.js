@@ -6,7 +6,7 @@ const { Pool } = require('pg');
 
 const PORT = Number(process.env.PORT || 8080);
 const BACKEND_URL = 'https://tradearena-backend.onrender.com';
-const DATABASE_URL = 'postgresql://postgres:bA5v7KtIhyIFrH8i@db.qbwskelvnmqpanxnzswt.supabase.co:5432/postgres';
+const DATABASE_URL = 'postgresql://postgres:bA5v7KtIhyIFrH8i@db.qbwskelvnmqpanxnzswt.supabase.co:6543/postgres';
 const RATE_LIMIT_WINDOW_MS = Number(process.env.RATE_LIMIT_WINDOW_MS || 60_000);
 const RATE_LIMIT_MAX = Number(process.env.RATE_LIMIT_MAX || 240);
 
