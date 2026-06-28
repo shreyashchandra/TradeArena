@@ -1,4 +1,5 @@
 const http = require('http');
+const https = require('https');
 const crypto = require('crypto');
 const { URL } = require('url');
 const { Pool } = require('pg');
@@ -151,7 +152,8 @@ function backendJson(method, path, currentUser, body = null) {
       headers['content-type'] = 'application/json';
       headers['content-length'] = String(body.length);
     }
-    const upstream = http.request(target, { method, headers }, (upstreamRes) => {
+    const requestModule = target.protocol === 'https:' ? https : http;
+    const upstream = requestModule.request(target, { method, headers }, (upstreamRes) => {
       let text = '';
       upstreamRes.setEncoding('utf8');
       upstreamRes.on('data', (chunk) => {
@@ -600,7 +602,9 @@ function proxy(req, res, currentUser = null, pathOverride = null) {
       headers['content-length'] = String(body.length);
     }
 
-    const upstream = http.request(target, { method: req.method, headers }, (upstreamRes) => {
+    const requestModule = target.protocol === 'https:' ? https : http;
+
+    const upstream = requestModule.request(target, { method: req.method, headers }, (upstreamRes) => {
       res.writeHead(upstreamRes.statusCode || 502, {
         ...upstreamRes.headers,
         'access-control-allow-origin': '*',
@@ -679,7 +683,9 @@ function broadcast(type, data) {
 }
 
 function connectMarketDataStream() {
-  const req = http.get(`${BACKEND_URL}/api/events`, (res) => {
+  const requestModule = BACKEND_URL.startsWith('https') ? https : http;
+  
+  const req = requestModule.get(`${BACKEND_URL}/api/events`, (res) => {
     res.setEncoding('utf8');
     let buffer = '';
     let event = 'message';
@@ -880,7 +886,6 @@ async function waitForDatabase() {
       return;
     } catch (error) {
       lastError = error;
-      console.log(`waiting for postgres (${attempt}/30): ${error.message}`);
       await new Promise((resolve) => setTimeout(resolve, 1000));
     }
   }
@@ -890,11 +895,9 @@ async function waitForDatabase() {
 waitForDatabase()
   .then(() => {
     server.listen(PORT, () => {
-      console.log(`tradearena gateway listening on http://localhost:${PORT}`);
       connectMarketDataStream();
     });
   })
   .catch((error) => {
-    console.error(`failed to initialize postgres auth schema: ${error.message}`);
     process.exit(1);
   });
