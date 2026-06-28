@@ -460,6 +460,19 @@ class Server {
 
   void route(int client, const HttpRequest& request) {
     if ((request.method == "GET" || request.method == "HEAD") &&
+        request.path == "/health") {
+      respond(client, 200, "{\"status\":\"ok\",\"service\":\"tradearena-backend\"}");
+      return;
+    }
+
+    if ((request.method == "GET" || request.method == "HEAD") &&
+        (request.path == "/" || request.path.empty())) {
+      respond(client, 200,
+              "{\"service\":\"tradearena-backend\",\"docs\":\"/docs\",\"health\":\"/health\"}");
+      return;
+    }
+
+    if ((request.method == "GET" || request.method == "HEAD") &&
         request.path == "/openapi.json") {
       const auto spec = read_file("docs/openapi.json");
       if (spec.empty()) {
