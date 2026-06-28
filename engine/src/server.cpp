@@ -402,7 +402,7 @@ class Server {
     out << "HTTP/1.1 " << status << ' ' << reason << "\r\n"
         << "Access-Control-Allow-Origin: *\r\n"
         << "Access-Control-Allow-Methods: GET,POST,DELETE,OPTIONS\r\n"
-        << "Access-Control-Allow-Headers: Content-Type\r\n"
+        << "Access-Control-Allow-Headers: Content-Type,Authorization,X-TradeArena-User\r\n"
         << "Connection: close\r\n"
         << "Content-Type: " << type << "\r\n"
         << "Content-Length: " << length << "\r\n\r\n";
