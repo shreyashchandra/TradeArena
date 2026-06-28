@@ -158,3 +158,6 @@ subnets, domain, TLS certificate, and IAM roles.
 
 
  codex resume 019efd7d-29dc-7eb1-af94-c94506e696af
+bA5v7KtIhyIFrH8i
+
+postgresql://postgres:bA5v7KtIhyIFrH8i@db.qbwskelvnmqpanxnzswt.supabase.co:5432/postgres
