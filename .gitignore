@@ -1,0 +1,48 @@
+# OS/editor files
+.DS_Store
+Thumbs.db
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Environment and secrets
+.env
+.env.*
+!.env.example
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Node dependencies and builds
+node_modules/
+web/node_modules/
+gateway/node_modules/
+web/dist/
+web/.vite/
+
+# C++ build outputs
+build/
+*.o
+*.obj
+*.out
+*.exe
+*.dSYM/
+
+# Docker/local data
+postgres_data/
+redis_data/
+
+# Coverage/cache
+coverage/
+.nyc_output/
+.cache/
+
+# Temporary files
+tmp/
+temp/
+*.tmp

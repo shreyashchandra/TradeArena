@@ -1,0 +1,793 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "TradeArena Backend API",
+    "version": "0.1.0",
+    "description": "HTTP and Server-Sent Events API for the local C++ TradeArena paper trading backend. Prices are represented as integer paise/ticks."
+  },
+  "servers": [
+    {
+      "url": "http://localhost:8080",
+      "description": "Local Node.js API Gateway"
+    },
+    {
+      "url": "http://localhost:8081",
+      "description": "Direct local C++ backend"
+    }
+  ],
+  "tags": [
+    {
+      "name": "State",
+      "description": "Account, quote, position, order, and fill state"
+    },
+    {
+      "name": "Auth",
+      "description": "PostgreSQL-backed user registration, login, and session lookup"
+    },
+    {
+      "name": "Symbols",
+      "description": "Search and load delayed Yahoo Finance NSE/BSE symbols"
+    },
+    {
+      "name": "Orders",
+      "description": "Paper order placement and cancellation"
+    },
+    {
+      "name": "Session",
+      "description": "Paper account lifecycle"
+    },
+    {
+      "name": "Events",
+      "description": "Server-Sent Events stream"
+    }
+  ],
+  "paths": {
+    "/auth/register": {
+      "post": {
+        "tags": ["Auth"],
+        "summary": "Create a TradeArena user",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/RegisterRequest" }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Registered and logged in.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/AuthResponse" }
+              }
+            }
+          },
+          "409": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/auth/login": {
+      "post": {
+        "tags": ["Auth"],
+        "summary": "Login with email or handle",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": { "$ref": "#/components/schemas/LoginRequest" }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Logged in.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/AuthResponse" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/auth/logout": {
+      "post": {
+        "tags": ["Auth"],
+        "summary": "Logout current bearer token",
+        "responses": {
+          "200": {
+            "description": "Logged out.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "logout": { "type": "boolean", "example": true }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/me": {
+      "get": {
+        "tags": ["Auth"],
+        "summary": "Get current authenticated user",
+        "security": [{ "bearerAuth": [] }],
+        "responses": {
+          "200": {
+            "description": "Current user and account.",
+            "content": {
+              "application/json": {
+                "schema": { "$ref": "#/components/schemas/MeResponse" }
+              }
+            }
+          },
+          "401": { "$ref": "#/components/responses/Error" }
+        }
+      }
+    },
+    "/api/state": {
+      "get": {
+        "tags": ["State"],
+        "summary": "Get current paper trading state",
+        "responses": {
+          "200": {
+            "description": "Current account, quotes, positions, open orders, and fills.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/State"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/search": {
+      "get": {
+        "tags": ["Symbols"],
+        "summary": "Search NSE/BSE symbols through Yahoo Finance",
+        "parameters": [
+          {
+            "name": "q",
+            "in": "query",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 2,
+              "example": "SBICARD"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Matching symbols from Yahoo Finance.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["results"],
+                  "properties": {
+                    "results": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/SymbolSearchResult"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/symbols": {
+      "post": {
+        "tags": ["Symbols"],
+        "summary": "Add a searched symbol to Market Watch",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AddSymbolRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Symbol added and delayed quote loaded.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "required": ["quote"],
+                  "properties": {
+                    "quote": {
+                      "$ref": "#/components/schemas/Quote"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "404": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/orders": {
+      "post": {
+        "tags": ["Orders"],
+        "summary": "Place a paper order",
+        "description": "Market orders fill immediately at the simulated ask for buys or bid for sells. Limit orders remain open until delayed market data crosses the limit.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrderRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Order accepted.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrderAck"
+                }
+              }
+            }
+          },
+          "400": {
+            "$ref": "#/components/responses/Error"
+          }
+        }
+      }
+    },
+    "/api/orders/{id}": {
+      "delete": {
+        "tags": ["Orders"],
+        "summary": "Cancel an open paper order",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "format": "uint64",
+              "example": 1719302400000
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Order cancelled.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CancelResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Order was not found.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CancelResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/reset": {
+      "post": {
+        "tags": ["Session"],
+        "summary": "Reset the paper account",
+        "responses": {
+          "200": {
+            "description": "Account reset to starting cash and default watchlist.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResetResponse"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/events": {
+      "get": {
+        "tags": ["Events"],
+        "summary": "Subscribe to paper trading events",
+        "description": "Server-Sent Events stream. Emits `state` events containing a State object and `fill` events containing a Fill object.",
+        "responses": {
+          "200": {
+            "description": "SSE stream.",
+            "content": {
+              "text/event-stream": {
+                "schema": {
+                  "type": "string",
+                  "example": "event: state\\ndata: {\"account\":{\"cash\":100000000}}\\n\\n"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/health": {
+      "get": {
+        "tags": ["Gateway"],
+        "summary": "Gateway health check",
+        "responses": {
+          "200": {
+            "description": "Gateway is healthy.",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": { "type": "string", "example": "ok" },
+                    "backend": { "type": "string", "example": "http://localhost:8081" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/metrics": {
+      "get": {
+        "tags": ["Gateway"],
+        "summary": "Prometheus gateway metrics",
+        "responses": {
+          "200": {
+            "description": "Prometheus text exposition format.",
+            "content": {
+              "text/plain": {
+                "schema": {
+                  "type": "string",
+                  "example": "tradearena_gateway_requests_total 10"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/ws/market-data": {
+      "get": {
+        "tags": ["Events"],
+        "summary": "WebSocket market data stream",
+        "description": "Upgrade this route to WebSocket through the Node.js API Gateway. Messages contain `{ type, data, ts }` JSON payloads.",
+        "responses": {
+          "101": {
+            "description": "WebSocket protocol upgrade."
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "securitySchemes": {
+      "bearerAuth": {
+        "type": "http",
+        "scheme": "bearer"
+      }
+    },
+    "responses": {
+      "Error": {
+        "description": "Error response.",
+        "content": {
+          "application/json": {
+            "schema": {
+              "$ref": "#/components/schemas/Error"
+            }
+          }
+        }
+      }
+    },
+    "schemas": {
+      "User": {
+        "type": "object",
+        "required": ["id", "email", "handle", "name"],
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "email": { "type": "string", "example": "demo@tradearena.local" },
+          "handle": { "type": "string", "example": "demo" },
+          "name": { "type": "string", "example": "Demo Trader" }
+        }
+      },
+      "RegisterRequest": {
+        "type": "object",
+        "required": ["email", "name", "handle", "password"],
+        "properties": {
+          "email": { "type": "string", "example": "demo@tradearena.local" },
+          "name": { "type": "string", "example": "Demo Trader" },
+          "handle": { "type": "string", "example": "demo" },
+          "password": { "type": "string", "format": "password", "example": "password123" }
+        }
+      },
+      "LoginRequest": {
+        "type": "object",
+        "required": ["login", "password"],
+        "properties": {
+          "login": { "type": "string", "example": "demo" },
+          "password": { "type": "string", "format": "password", "example": "password123" }
+        }
+      },
+      "AuthResponse": {
+        "type": "object",
+        "required": ["token", "user", "account"],
+        "properties": {
+          "token": { "type": "string" },
+          "user": { "$ref": "#/components/schemas/User" },
+          "account": {
+            "type": "object",
+            "properties": {
+              "cash": { "type": "integer", "example": 100000000 },
+              "realizedPnl": { "type": "integer", "example": 0 }
+            }
+          }
+        }
+      },
+      "MeResponse": {
+        "type": "object",
+        "required": ["user", "account"],
+        "properties": {
+          "user": { "$ref": "#/components/schemas/User" },
+          "account": {
+            "type": "object",
+            "properties": {
+              "cash": { "type": "integer", "example": 100000000 },
+              "realizedPnl": { "type": "integer", "example": 0 }
+            }
+          }
+        }
+      },
+      "Account": {
+        "type": "object",
+        "required": ["cash", "equity", "realizedPnl", "unrealizedPnl"],
+        "properties": {
+          "cash": {
+            "type": "integer",
+            "description": "Available paper cash in paise.",
+            "example": 100000000
+          },
+          "equity": {
+            "type": "integer",
+            "description": "Cash plus unrealized P&L in paise.",
+            "example": 100000000
+          },
+          "realizedPnl": {
+            "type": "integer",
+            "description": "Realized P&L in paise.",
+            "example": 0
+          },
+          "unrealizedPnl": {
+            "type": "integer",
+            "description": "Unrealized P&L in paise.",
+            "example": 0
+          }
+        }
+      },
+      "Quote": {
+        "type": "object",
+        "required": ["symbol", "bid", "ask", "last", "changeBps"],
+        "properties": {
+          "symbol": {
+            "type": "string",
+            "example": "RELIANCE"
+          },
+          "bid": {
+            "type": "integer",
+            "description": "Simulated bid in paise.",
+            "example": 131987
+          },
+          "ask": {
+            "type": "integer",
+            "description": "Simulated ask in paise.",
+            "example": 132013
+          },
+          "last": {
+            "type": "integer",
+            "description": "Delayed last traded price in paise.",
+            "example": 132000
+          },
+          "changeBps": {
+            "type": "integer",
+            "description": "Change from previous close in basis points.",
+            "example": 42
+          }
+        }
+      },
+      "Position": {
+        "type": "object",
+        "required": ["symbol", "quantity", "averagePrice", "markPrice", "unrealizedPnl"],
+        "properties": {
+          "symbol": {
+            "type": "string",
+            "example": "SBICARD"
+          },
+          "quantity": {
+            "type": "integer",
+            "example": 10
+          },
+          "averagePrice": {
+            "type": "integer",
+            "description": "Average entry price in paise.",
+            "example": 62520
+          },
+          "markPrice": {
+            "type": "integer",
+            "description": "Current mark price in paise.",
+            "example": 62600
+          },
+          "unrealizedPnl": {
+            "type": "integer",
+            "description": "Unrealized P&L in paise.",
+            "example": 800
+          }
+        }
+      },
+      "Order": {
+        "type": "object",
+        "required": ["id", "symbol", "side", "type", "price", "quantity", "remaining", "status"],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "uint64",
+            "example": 1719302400000
+          },
+          "symbol": {
+            "type": "string",
+            "example": "SBICARD"
+          },
+          "side": {
+            "$ref": "#/components/schemas/Side"
+          },
+          "type": {
+            "$ref": "#/components/schemas/OrderType"
+          },
+          "price": {
+            "type": "integer",
+            "description": "Limit price in paise. Market orders use 0.",
+            "example": 62520
+          },
+          "quantity": {
+            "type": "integer",
+            "format": "uint64",
+            "example": 5
+          },
+          "remaining": {
+            "type": "integer",
+            "format": "uint64",
+            "example": 0
+          },
+          "status": {
+            "type": "string",
+            "enum": ["open", "filled", "rejected"],
+            "example": "filled"
+          }
+        }
+      },
+      "Fill": {
+        "type": "object",
+        "required": ["orderId", "symbol", "side", "price", "quantity"],
+        "properties": {
+          "orderId": {
+            "type": "integer",
+            "format": "uint64",
+            "example": 1719302400000
+          },
+          "symbol": {
+            "type": "string",
+            "example": "SBICARD"
+          },
+          "side": {
+            "$ref": "#/components/schemas/Side"
+          },
+          "price": {
+            "type": "integer",
+            "description": "Fill price in paise.",
+            "example": 62526
+          },
+          "quantity": {
+            "type": "integer",
+            "format": "uint64",
+            "example": 5
+          }
+        }
+      },
+      "State": {
+        "type": "object",
+        "required": ["account", "quotes", "positions", "openOrders", "fills"],
+        "properties": {
+          "account": {
+            "$ref": "#/components/schemas/Account"
+          },
+          "quotes": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Quote"
+            }
+          },
+          "positions": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Position"
+            }
+          },
+          "openOrders": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Order"
+            }
+          },
+          "fills": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Fill"
+            }
+          }
+        }
+      },
+      "Side": {
+        "type": "string",
+        "enum": ["buy", "sell"],
+        "example": "buy"
+      },
+      "OrderType": {
+        "type": "string",
+        "enum": ["market", "limit"],
+        "example": "market"
+      },
+      "OrderRequest": {
+        "type": "object",
+        "required": ["id", "symbol", "side", "type", "quantity"],
+        "properties": {
+          "id": {
+            "type": "integer",
+            "format": "uint64",
+            "example": 1719302400000
+          },
+          "symbol": {
+            "type": "string",
+            "example": "SBICARD"
+          },
+          "side": {
+            "$ref": "#/components/schemas/Side"
+          },
+          "type": {
+            "$ref": "#/components/schemas/OrderType"
+          },
+          "price": {
+            "type": "integer",
+            "description": "Limit price in paise. Use 0 for market orders.",
+            "example": 0
+          },
+          "quantity": {
+            "type": "integer",
+            "format": "uint64",
+            "minimum": 1,
+            "example": 5
+          }
+        }
+      },
+      "OrderAck": {
+        "type": "object",
+        "required": ["accepted", "message", "order", "fills"],
+        "properties": {
+          "accepted": {
+            "type": "boolean",
+            "example": true
+          },
+          "message": {
+            "type": "string",
+            "example": "filled"
+          },
+          "order": {
+            "$ref": "#/components/schemas/Order"
+          },
+          "fills": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/Fill"
+            }
+          }
+        }
+      },
+      "SymbolSearchResult": {
+        "type": "object",
+        "required": ["symbol", "yahooSymbol", "name", "exchange"],
+        "properties": {
+          "symbol": {
+            "type": "string",
+            "example": "SBICARD"
+          },
+          "yahooSymbol": {
+            "type": "string",
+            "example": "SBICARD.NS"
+          },
+          "name": {
+            "type": "string",
+            "example": "SBI Cards and Payment Services Limited"
+          },
+          "exchange": {
+            "type": "string",
+            "enum": ["NSE", "BSE"],
+            "example": "NSE"
+          }
+        }
+      },
+      "AddSymbolRequest": {
+        "type": "object",
+        "required": ["yahooSymbol"],
+        "properties": {
+          "yahooSymbol": {
+            "type": "string",
+            "example": "SBICARD.NS"
+          }
+        }
+      },
+      "CancelResponse": {
+        "type": "object",
+        "required": ["cancelled"],
+        "properties": {
+          "cancelled": {
+            "type": "boolean",
+            "example": true
+          }
+        }
+      },
+      "ResetResponse": {
+        "type": "object",
+        "required": ["reset"],
+        "properties": {
+          "reset": {
+            "type": "boolean",
+            "example": true
+          }
+        }
+      },
+      "Error": {
+        "type": "object",
+        "properties": {
+          "error": {
+            "type": "string",
+            "example": "symbol not found"
+          },
+          "accepted": {
+            "type": "boolean",
+            "example": false
+          },
+          "message": {
+            "type": "string",
+            "example": "unknown symbol"
+          }
+        }
+      }
+    }
+  }
+}

@@ -1,0 +1,19 @@
+FROM alpine:3.20 AS build
+
+RUN apk add --no-cache build-base curl make
+WORKDIR /app
+
+COPY Makefile ./
+COPY engine ./engine
+RUN make server
+
+FROM alpine:3.20
+
+RUN apk add --no-cache libstdc++ curl
+WORKDIR /app
+
+COPY --from=build /app/build/exchange_server /app/exchange_server
+COPY docs ./docs
+
+EXPOSE 8081
+CMD ["/bin/sh", "-c", "/app/exchange_server ${PORT:-8081}"]
