@@ -145,7 +145,7 @@ Compose starts:
 - Prometheus on `9090`
 
 ## Load Test
-
+meaw
 ```sh
 BASE_URL=http://localhost:8080 REQUESTS=1000 CONCURRENCY=50 node scripts/load_test.js
 ```
