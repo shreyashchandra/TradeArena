@@ -1454,3 +1454,15 @@ button.t-row:hover {
     padding-inline: 20px;
   }
 }
+
+/* ---------- connection banner ---------- */
+
+.banner {
+  background: var(--down-soft);
+  border-block-end: 1px solid color-mix(in srgb, var(--down) 35%, transparent);
+  color: var(--down);
+  font-size: 13px;
+  font-weight: 600;
+  padding: 10px 16px;
+  text-align: center;
+}

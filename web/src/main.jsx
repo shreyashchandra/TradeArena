@@ -778,6 +778,7 @@ function App() {
       return null;
     }
   });
+  const refreshRef = useRef(() => {});
   const user = auth?.user;
   const currentRank = leaderboard.find((row) => row.handle === user?.handle)?.rank;
 
@@ -802,42 +803,114 @@ function App() {
   useEffect(() => {
     if (!auth?.token) return undefined;
 
-    const loadLeaderboard = () => {
-      fetch(`${API_BASE}/api/leaderboard`, {
+    let cancelled = false;
+    let events = null;
+    let retryTimer = null;
+    let retryDelay = 2000;
+    let lastStateLoad = 0;
+    let stateInFlight = false;
+
+    const getJson = async (path) => {
+      const response = await fetch(`${API_BASE}${path}`, {
         headers: { Authorization: `Bearer ${auth.token}` },
-      })
-        .then((response) => response.json())
-        .then((payload) => setLeaderboard(payload.rows ?? []))
-        .catch(() => setLeaderboard([]));
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok || !payload) {
+        throw new Error(payload?.detail || payload?.error || `HTTP ${response.status}`);
+      }
+      return payload;
     };
 
+    const loadLeaderboard = () => {
+      getJson('/api/leaderboard')
+        .then((payload) => !cancelled && setLeaderboard(payload.rows ?? []))
+        .catch(() => {});
+    };
+
+    // Full account snapshot (cash, positions, orders, fills). Quotes stream in via
+    // SSE, so this only needs to run on fills/actions and as a slow safety refresh.
     const loadState = () => {
-      fetch(`${API_BASE}/api/state`, {
-        headers: { Authorization: `Bearer ${auth.token}` },
-      })
-        .then((response) => response.json())
+      if (stateInFlight) return;
+      stateInFlight = true;
+      lastStateLoad = Date.now();
+      getJson('/api/state')
         .then((next) => {
-          setState(next);
-          if (next.quotes[0]) {
-            setSelected((current) => current || next.quotes[0].symbol);
-          }
+          if (cancelled) return;
+          setState({ ...emptyState, ...next, account: { ...emptyState.account, ...next.account } });
+          if (next.quotes?.[0]) setSelected((current) => current || next.quotes[0].symbol);
         })
-        .catch(() => setStatus('offline'));
-      loadLeaderboard();
+        .catch(() => !cancelled && setStatus((s) => (s === 'live' ? s : 'offline')))
+        .finally(() => {
+          stateInFlight = false;
+        });
+    };
+
+    // Apply streamed quotes locally and re-mark positions, without extra requests.
+    const applyQuotes = (quotes) => {
+      if (!Array.isArray(quotes) || quotes.length === 0) return;
+      setState((current) => {
+        const bySymbol = new Map(quotes.map((q) => [q.symbol, q]));
+        let unrealizedPnl = 0;
+        const positions = current.positions.map((p) => {
+          const q = bySymbol.get(p.symbol);
+          const markPrice = q ? Math.round((q.bid + q.ask) / 2) : p.markPrice;
+          const pnl = (markPrice - p.averagePrice) * p.quantity;
+          unrealizedPnl += pnl;
+          return { ...p, markPrice, unrealizedPnl: pnl };
+        });
+        return {
+          ...current,
+          quotes,
+          positions,
+          account: { ...current.account, unrealizedPnl, equity: current.account.cash + unrealizedPnl },
+        };
+      });
+    };
+
+    const connect = () => {
+      if (cancelled) return;
+      events = new EventSource(`${API_BASE}/api/events?token=${encodeURIComponent(auth.token)}`);
+      events.addEventListener('open', () => {
+        retryDelay = 2000;
+        setStatus('live');
+      });
+      events.addEventListener('error', () => {
+        setStatus('reconnecting');
+        // A non-200 (e.g. 429) closes the stream for good; reconnect ourselves with backoff.
+        if (events.readyState === EventSource.CLOSED) {
+          events.close();
+          retryTimer = window.setTimeout(connect, retryDelay);
+          retryDelay = Math.min(retryDelay * 2, 60000);
+        }
+      });
+      events.addEventListener('state', (event) => {
+        try {
+          applyQuotes(JSON.parse(event.data).quotes);
+        } catch {
+          /* ignore malformed frame */
+        }
+        if (Date.now() - lastStateLoad > 15000) loadState();
+      });
+      events.addEventListener('fill', (event) => {
+        const fill = JSON.parse(event.data);
+        push(`Filled ${fill.side} ${fill.quantity} ${fill.symbol} @ ${money(fill.price)}`, fill.side);
+        loadState();
+      });
     };
 
     loadState();
+    loadLeaderboard();
+    connect();
+    const leaderboardTimer = window.setInterval(loadLeaderboard, 30000);
+    refreshRef.current = loadState;
 
-    const events = new EventSource(`${API_BASE}/api/events?token=${encodeURIComponent(auth.token)}`);
-    events.addEventListener('open', () => setStatus('live'));
-    events.addEventListener('error', () => setStatus('reconnecting'));
-    events.addEventListener('state', loadState);
-    events.addEventListener('fill', (event) => {
-      const fill = JSON.parse(event.data);
-      push(`Filled ${fill.side} ${fill.quantity} ${fill.symbol} @ ${money(fill.price)}`, fill.side);
-      loadState();
-    });
-    return () => events.close();
+    return () => {
+      cancelled = true;
+      events?.close();
+      window.clearTimeout(retryTimer);
+      window.clearInterval(leaderboardTimer);
+      refreshRef.current = () => {};
+    };
   }, [auth?.token, push]);
 
   useEffect(() => {
@@ -870,6 +943,7 @@ function App() {
       });
       const ack = await response.json();
       push(ack.message || 'Order sent', ack.accepted === false || !response.ok ? 'error' : 'info');
+      refreshRef.current();
     } catch {
       push('Order failed: server unreachable', 'error');
     }
@@ -883,6 +957,7 @@ function App() {
       });
       const ack = await response.json();
       push(ack.cancelled ? `Cancelled order #${String(id).slice(-6)}` : `Order #${id} not found`, ack.cancelled ? 'info' : 'error');
+      refreshRef.current();
     } catch {
       push('Cancel failed: server unreachable', 'error');
     }
@@ -900,6 +975,7 @@ function App() {
         setSelected(payload.quote.symbol);
         setMarketSearch('');
         push(`Added ${payload.quote.symbol} from ${result.exchange}`);
+        refreshRef.current();
       } else {
         push(`Could not add ${result.yahooSymbol}`, 'error');
       }
@@ -915,6 +991,7 @@ function App() {
       headers: { Authorization: `Bearer ${auth.token}` },
     });
     push('Paper account reset');
+    refreshRef.current();
   }
 
   async function logout() {
@@ -947,6 +1024,12 @@ function App() {
           <UserMenu user={user} onReset={reset} onLogout={logout} />
         </div>
       </header>
+
+      {status === 'offline' && (
+        <div className="banner" role="status">
+          Can&apos;t reach the trading server right now. Retrying automatically…
+        </div>
+      )}
 
       <main className="shell">
         <section className="metrics">

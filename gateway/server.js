@@ -6,7 +6,8 @@ const path = require('path');
 const { URL } = require('url');
 
 const PORT = Number(process.env.PORT || 8080);
-const BACKEND_URL = 'https://tradearena-backend.onrender.com';
+const BACKEND_URL = process.env.BACKEND_URL || 'https://tradearena-backend.onrender.com';
+const BACKEND_STATE_TTL_MS = Number(process.env.BACKEND_STATE_TTL_MS || 2000);
 const DATA_FILE = process.env.DATA_FILE || path.join('/tmp', 'tradearena-gateway.json');
 const RATE_LIMIT_WINDOW_MS = Number(process.env.RATE_LIMIT_WINDOW_MS || 60_000);
 const RATE_LIMIT_MAX = Number(process.env.RATE_LIMIT_MAX || 240);
@@ -221,6 +222,8 @@ function requestBackend(method, requestPath, currentUser, body = null) {
     const target = new URL(requestPath, BACKEND_URL);
     const headers = {
       host: target.host,
+      'user-agent': 'tradearena-gateway/1.0',
+      accept: 'application/json',
       'x-tradearena-user': currentUser.row.handle,
     };
     if (body) {
@@ -235,16 +238,48 @@ function requestBackend(method, requestPath, currentUser, body = null) {
         text += chunk;
       });
       upstreamRes.on('end', () => {
+        const status = upstreamRes.statusCode || 502;
         try {
-          resolve({ status: upstreamRes.statusCode || 502, data: text ? JSON.parse(text) : null, text });
-        } catch (error) {
-          reject(error);
+          resolve({ status, data: text ? JSON.parse(text) : null, text });
+        } catch {
+          const challenged = upstreamRes.headers['cf-mitigated'] || /just a moment/i.test(text);
+          reject(new Error(challenged
+            ? `backend blocked by Cloudflare challenge (HTTP ${status})`
+            : `backend returned non-JSON response (HTTP ${status})`));
         }
       });
     });
     upstream.on('error', reject);
     upstream.end(body || undefined);
   });
+}
+
+// Market quotes are shared by every user, so one cached backend snapshot serves
+// all /api/state and /api/leaderboard calls. This keeps gateway->backend traffic
+// at ~1 request per TTL instead of one per client request.
+let backendStateCache = { data: null, at: 0, pending: null };
+
+function cachedBackendState(currentUser) {
+  const now = Date.now();
+  if (backendStateCache.data && now - backendStateCache.at < BACKEND_STATE_TTL_MS) {
+    return Promise.resolve(backendStateCache.data);
+  }
+  if (backendStateCache.pending) return backendStateCache.pending;
+  backendStateCache.pending = requestBackend('GET', '/api/state', currentUser)
+    .then((upstream) => {
+      if (upstream.status >= 400 || !upstream.data) {
+        throw new Error(`backend state returned HTTP ${upstream.status}`);
+      }
+      backendStateCache = { data: upstream.data, at: Date.now(), pending: null };
+      return upstream.data;
+    })
+    .catch((error) => {
+      backendStateCache.pending = null;
+      // Serve a stale snapshot rather than failing if we have one.
+      if (backendStateCache.data) return backendStateCache.data;
+      throw error;
+    });
+  return backendStateCache.pending;
 }
 
 function quoteMap(quotes) {
@@ -506,16 +541,16 @@ const server = http.createServer((req, res) => {
     }
 
     if (req.method === 'GET' && url.pathname === '/api/state') {
-      requestBackend('GET', '/api/state', current)
-        .then((upstream) => json(res, 200, stateFor(current, upstream.data)))
-        .catch((error) => json(res, 500, { error: 'state failed', detail: error.message }));
+      cachedBackendState(current)
+        .then((backendState) => json(res, 200, stateFor(current, backendState)))
+        .catch((error) => json(res, 502, { error: 'state failed', detail: error.message }));
       return;
     }
 
     if (req.method === 'GET' && url.pathname === '/api/leaderboard') {
-      requestBackend('GET', '/api/state', current)
-        .then((upstream) => json(res, 200, { rows: leaderboardRows(upstream.data) }))
-        .catch((error) => json(res, 500, { error: 'leaderboard failed', detail: error.message }));
+      cachedBackendState(current)
+        .then((backendState) => json(res, 200, { rows: leaderboardRows(backendState) }))
+        .catch((error) => json(res, 502, { error: 'leaderboard failed', detail: error.message }));
       return;
     }
 
